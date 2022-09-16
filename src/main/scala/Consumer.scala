@@ -1,9 +1,11 @@
 package com.andy
 
 import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.clients.consumer.internals.NoOpConsumerRebalanceListener
 
 import java.time.Duration
 import java.time.temporal.ChronoUnit
+import java.util.regex.Pattern
 import java.util.{Collections, Properties}
 
 object Consumer {
@@ -22,12 +24,18 @@ object Consumer {
 
   def main(args: Array[String]): Unit = {
     val consumer = new KafkaConsumer[String, String](kafkaProperties)
-    consumer.subscribe(Collections.singletonList("topic1"))
+    val pattern = Pattern.compile(".*")
+    val rebalanceListener = new NoOpConsumerRebalanceListener()
+    consumer.subscribe(pattern, rebalanceListener)
 
-    val records = consumer.poll(Duration.of(5, ChronoUnit.SECONDS))
-    records.forEach { record =>
-      println("key: " + record.key)
-      println("value: " + record.value())
+    while (true) {
+      val records = consumer.poll(Duration.of(5, ChronoUnit.SECONDS))
+      records.forEach { record =>
+        print("[" + record.topic() + "] ")
+        print("[" + record.key + "]: ")
+        println(record.value())
+      }
+      Thread.sleep(500)
     }
   }
 

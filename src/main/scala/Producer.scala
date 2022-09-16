@@ -3,6 +3,7 @@ package com.andy
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 
 import java.util.Properties
+import scala.io.StdIn
 
 object Producer {
 
@@ -20,10 +21,18 @@ object Producer {
   val producer = new KafkaProducer[String, String](kafkaProperties)
 
   def main(args: Array[String]): Unit = {
+    var msg = ""
+    var iteration = 0
+    do {
+      msg = StdIn.readLine()
 
-    val producerRecord = new ProducerRecord[String, String]("topic1", "Key", "Hello Andy!")
-    producer.send(producerRecord)
+      val producerRecord = new ProducerRecord[String, String]("src-topic", iteration.toString, msg)
+      producer.send(producerRecord)
 
+      iteration = iteration + 1
+    } while (msg != "exit" || msg != "q")
+
+    Thread.sleep(2000)
     println("application completed it's execution")
   }
 
