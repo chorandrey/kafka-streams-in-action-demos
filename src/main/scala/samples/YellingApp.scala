@@ -2,7 +2,7 @@ package com.andy
 package samples
 
 import org.apache.kafka.common.serialization.Serdes
-import org.apache.kafka.streams.kstream.Consumed
+import org.apache.kafka.streams.kstream.{Consumed, KStream, Produced}
 import org.apache.kafka.streams.{KafkaStreams, StreamsBuilder, StreamsConfig}
 
 import java.util.Properties
@@ -23,10 +23,11 @@ object YellingApp {
     val stringSerde = Serdes.String()
 
     val streamsBuilder = new StreamsBuilder()
-    val inStream = streamsBuilder.stream[String, String]("src-topic", Consumed.`with`(stringSerde, stringSerde))
+    val inStream: KStream[String, String] = streamsBuilder.stream[String, String]("src-topic",
+      Consumed.`with`(stringSerde, stringSerde))
 
     val upperCasedStream = inStream.mapValues(elem => elem.toUpperCase)
-    upperCasedStream.to("dst-topic")
+    upperCasedStream.to("dst-topic", Produced.`with`(stringSerde, stringSerde))
 
     val kafkaStreams = new KafkaStreams(streamsBuilder.build(), streamsProperties)
     kafkaStreams.start()
