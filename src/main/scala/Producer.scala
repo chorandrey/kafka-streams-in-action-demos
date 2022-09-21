@@ -11,6 +11,7 @@ import java.util.Properties
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.io.StdIn
+import scala.util.Random
 
 object Producer {
 
@@ -48,23 +49,38 @@ object Producer {
 object ProducerZmart extends IOApp {
   import fs2._
 
+  sealed trait Department
+  object Department {
+    def byIndex(i: Int): Department = i match {
+      case 0 => Store
+      case 1 => Electronix
+      case 2 => Cafe
+    }
+  }
+  case object Store extends Department
+  case object Electronix extends Department
+  case object Cafe extends Department
+
   val producerResource: Resource[IO, KafkaProducer[String, String]] = Resource.make(IO(new KafkaProducer[String, String](kafkaProperties)))(producer => IO(producer.close()))
   override def run(args: List[String]): IO[ExitCode] = {
 
     val stream = for {
       producer <- Stream.resource(producerResource)
       n <- Stream.iterate[IO, Int](0)(n => n + 1)
+      randomPrice = 100.0 * Random.nextDouble()
+      department = Department.byIndex(Random.nextInt(3))
       purchase = Purchase(
-        creditCard = "0000-0000-0000-0000-123" + n,
+        creditCard = "0000-0000-0000-0" + n,
         customerId = n.toString,
-        itemQty = Map(Item("item-id-" + n, 50.0 + n.toDouble * 0.5) -> n),
-        zipCode = "55202"
+        itemQty = Map(Item("item-id-" + n, randomPrice) -> n),
+        zipCode = "55202",
+        department = department.toString
       )
       purchaseStr = Json.toJson(purchase).toString()
       producerRecord = new ProducerRecord[String, String]("purchaseUnsafe", n.toString, purchaseStr)
       _ = producer.send(producerRecord)
       _ = println(purchaseStr)
-      _ <- Stream.sleep[IO](FiniteDuration(30, TimeUnit.SECONDS))
+      _ <- Stream.sleep[IO](FiniteDuration(15, TimeUnit.SECONDS))
     } yield ()
 
     stream.compile.drain.as(ExitCode.Success)

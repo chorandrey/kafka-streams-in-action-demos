@@ -10,7 +10,7 @@ import java.util.{Collections, Properties}
 
 object Consumer {
 
-  def kafkaProperties = {
+  def kafkaProperties: Properties = {
     val properties = new Properties();
     properties.put("bootstrap.servers", "localhost:9092")
     properties.put("group.id", "simple-consumer-example");

@@ -1,11 +1,12 @@
 package com.andy
 package samples
 
+import com.andy.ProducerZmart.{Cafe, Department, Electronix}
 import org.apache.kafka.common.serialization.Serdes.WrapperSerde
 import org.apache.kafka.common.serialization.{Deserializer, Serde, Serdes, Serializer}
 import org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG
 import org.apache.kafka.streams.errors.{LogAndFailExceptionHandler, StreamsUncaughtExceptionHandler}
-import org.apache.kafka.streams.kstream.{Consumed, ForeachAction, KStream, Produced}
+import org.apache.kafka.streams.kstream.{Branched, Consumed, ForeachAction, KStream, Named, Predicate, Produced}
 import org.apache.kafka.streams.{KafkaStreams, StreamsBuilder, StreamsConfig}
 import play.api.libs.json.{Format, JsArray, JsError, JsNumber, JsObject, JsResult, JsString, JsSuccess, JsValue, Json, OFormat}
 
@@ -31,6 +32,8 @@ object ZMartApp {
     val purchase = "purchase"
     val rewards = "rewards"
     val patterns = "patterns"
+    val cafe = "cafe"
+    val electronics = "electronics"
   }
 
   case class Item(id: String, price: Double)
@@ -70,7 +73,7 @@ object ZMartApp {
       }
     }
   }
-  case class Purchase(creditCard: String, customerId: String, itemQty: Map[Item, Int], zipCode: String)
+  case class Purchase(creditCard: String, customerId: String, itemQty: Map[Item, Int], zipCode: String, department: String)
   object Purchase {
     import Item.itemFormat
     implicit val purchaseFormat: OFormat[Purchase] = Json.format[Purchase]
@@ -123,7 +126,25 @@ object ZMartApp {
     val purchaseInputStream: KStream[String, Purchase] = purchaseUnsafeInputStream.mapValues { purchase =>
       purchase.copy(creditCard = maskCardNumber(purchase.creditCard))
     }
-    purchaseInputStream.to(TopicNames.purchase, Produced.`with`(stringSerde, Purchase.purchaseSerde))
+
+    val cafePredicate: Predicate[String, Purchase] = (k, p) => p.department == Cafe.toString
+    val electronicsPredicate: Predicate[String, Purchase] = (k, p) => p.department == Electronix.toString
+
+    val (cafeBranchName, electronicsBranchName) = ("cafe", "electronics")
+    val branchedResult = purchaseInputStream.split(Named.as("branch-"))
+      .branch(cafePredicate, Branched.as(cafeBranchName))
+      .branch(electronicsPredicate, Branched.as(electronicsBranchName))
+      .defaultBranch()
+    val cafeStream = branchedResult.get("branch-" + cafeBranchName)
+    val electronicsStream = branchedResult.get("branch-" + electronicsBranchName)
+
+    cafeStream.to(TopicNames.cafe, Produced.`with`(stringSerde, Purchase.purchaseSerde))
+    electronicsStream.to(TopicNames.electronics, Produced.`with`(stringSerde, Purchase.purchaseSerde))
+
+    val filterPurchaseLowPrice: Predicate[String, Purchase] = (k, purchase) => { purchase.itemQty.forall(_._1.price > 15.0) }
+    purchaseInputStream
+      .filter(filterPurchaseLowPrice)
+      .to(TopicNames.purchase, Produced.`with`(stringSerde, Purchase.purchaseSerde))
 
     val rewardsStream: KStream[String, String] = purchaseInputStream.mapValues { purchase =>
       val customerId = purchase.customerId
