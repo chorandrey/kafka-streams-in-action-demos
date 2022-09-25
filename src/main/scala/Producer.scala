@@ -1,13 +1,14 @@
 package com.andy
 
 import cats.effect.{ExitCode, IO, IOApp, Resource}
-import com.andy.Producer.kafkaProperties
-import com.andy.samples.ZMartApp
-import com.andy.samples.ZMartApp.{Item, Purchase}
+import Producer.kafkaProperties
+import model.Purchase
+
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerRecord}
 import play.api.libs.json.Json
 
-import java.util.Properties
+import java.time.Instant
+import java.util.{Date, Properties}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.io.StdIn
@@ -67,14 +68,25 @@ object ProducerZmart extends IOApp {
     val stream = for {
       producer <- Stream.resource(producerResource)
       n <- Stream.iterate[IO, Int](0)(n => n + 1)
-      randomPrice = 100.0 * Random.nextDouble()
       department = Department.byIndex(Random.nextInt(3))
+      zipCode = Random.nextInt(4) + 55202
+      itemPurchased = Random.nextInt(20).toString
+      quantity = Random.nextInt(10) + 1
+      price = Random.nextInt(100).toDouble + Random.nextInt(100).toDouble / 100.0
+      date = Date.from(Instant.now())
+      storeId = Random.nextInt(5) + 1
+      employeeId = Random.nextInt(1000)
       purchase = Purchase(
-        creditCard = "0000-0000-0000-0" + n,
+        creditCardNumber = "0000-0000-0000-0" + n,
         customerId = n.toString,
-        itemQty = Map(Item("item-id-" + n, randomPrice) -> n),
-        zipCode = "55202",
-        department = department.toString
+        itemPurchased = itemPurchased,
+        zipCode = zipCode.toString,
+        quantity = quantity,
+        price = price,
+        purchaseDate = date,
+        department = department.toString,
+        storeId = storeId.toString,
+        employeeId = Some(employeeId.toString)
       )
       purchaseStr = Json.toJson(purchase).toString()
       producerRecord = new ProducerRecord[String, String]("purchaseUnsafe", n.toString, purchaseStr)

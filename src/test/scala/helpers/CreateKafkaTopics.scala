@@ -2,7 +2,7 @@ package com.andy
 package helpers
 
 import cats.effect.{ExitCode, IO, IOApp}
-import com.andy.samples.ZMartApp.TopicNames
+import samples.ZMartApp.TopicNames
 import fs2._
 
 object CreateKafkaTopics extends IOApp {

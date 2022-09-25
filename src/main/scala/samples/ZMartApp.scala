@@ -9,11 +9,9 @@ import org.apache.kafka.streams.errors.{LogAndFailExceptionHandler, StreamsUncau
 import org.apache.kafka.streams.kstream.{Branched, Consumed, ForeachAction, KStream, Named, Predicate, Produced}
 import org.apache.kafka.streams.{KafkaStreams, StreamsBuilder, StreamsConfig}
 import play.api.libs.json.{Format, JsArray, JsError, JsNumber, JsObject, JsResult, JsString, JsSuccess, JsValue, Json, OFormat}
+import model._
 
-import java.nio.charset.StandardCharsets
 import java.util.Properties
-import scala.collection.mutable.ListBuffer
-import scala.util.{Failure, Success, Try}
 
 object ZMartApp {
 
@@ -36,84 +34,6 @@ object ZMartApp {
     val electronics = "electronics"
   }
 
-  case class Item(id: String, price: Double)
-  object Item {
-    implicit val itemFormat: OFormat[Item] = Json.format[Item]
-    implicit val mapFormat: Format[Map[Item, Int]] = new Format[Map[Item, Int]] {
-      override def writes(o: Map[Item, Int]): JsValue = JsArray(
-        o.map { case (item, qty) => JsObject(List(
-          "item" -> itemFormat.writes(item),
-          "qty" -> JsNumber(qty)
-        ))}.toList
-      )
-
-      override def reads(json: JsValue): JsResult[Map[Item, Int]] = {
-        json.validate[JsArray].flatMap { jsArray =>
-
-          val listBufJsResult = jsArray.value.foldLeft(ListBuffer[JsResult[(Item, Int)]]()){ case (acum, currentObj) =>
-            val currentRes = currentObj.validate[JsObject].flatMap { jsObj =>
-              Try {
-                for {
-                  item <- jsObj.value("item").validate[Item]
-                  qty <- jsObj.value("qty").validate[Int]
-                } yield (item -> qty)
-              } match {
-                case Success(value) => JsSuccess(value)
-                case Failure(exception) => JsError(exception.getMessage)
-              }
-            }.flatMap(identity)
-            acum.appended(currentRes)
-          }
-
-          listBufJsResult.find(_.isError) match {
-            case Some(err) => JsError()
-            case None => JsSuccess(listBufJsResult.map(_.get).toMap)
-          }
-        }
-      }
-    }
-  }
-  case class Purchase(creditCard: String, customerId: String, itemQty: Map[Item, Int], zipCode: String, department: String)
-  object Purchase {
-    import Item.itemFormat
-    implicit val purchaseFormat: OFormat[Purchase] = Json.format[Purchase]
-    val purchaseSerde: Serde[Purchase] = {
-      val purcaseSerializer = new Serializer[Purchase] {
-        override def serialize(topic: String, data: Purchase): Array[Byte] = {
-          Json.toJson(data).toString().getBytes(StandardCharsets.UTF_8)
-        }
-      }
-      val purchaseDeserializer = new Deserializer[Purchase] {
-        override def deserialize(topic: String, data: Array[Byte]): Purchase = {
-          try {
-            Json.parse(data).as[Purchase]
-          } catch {
-            case ex: Exception =>
-              println("Exception on deserialization")
-              println(ex.toString)
-              throw ex
-          }
-        }
-      }
-      new WrapperSerde[Purchase](purcaseSerializer, purchaseDeserializer)
-    }
-  }
-  case class PurchasePattern(zipCode: String, items: Map[Item, Int])
-  object PurchasePattern {
-    implicit val purchasePatternFormat: OFormat[PurchasePattern] = Json.format[PurchasePattern]
-    def apply(purchase: Purchase): PurchasePattern = PurchasePattern(
-      purchase.zipCode,
-      purchase.itemQty
-    )
-  }
-
-  def maskCardNumber(in: String): String = {
-    in.foldLeft((0, "")){ case ((count, acum), currentCh) =>
-      if (count >= 16) (count + 1, acum + currentCh)
-      else (count + 1, acum + '*')
-    }._2
-  }
-
   def main(args: Array[String]): Unit = {
     val stringSerde = Serdes.String()
 
@@ -123,9 +43,7 @@ object ZMartApp {
     val printAction: ForeachAction[String, Purchase] = (key, purchase) => { println("received by streams app" + purchase.toString) }
     purchaseUnsafeInputStream.peek(printAction)
 
-    val purchaseInputStream: KStream[String, Purchase] = purchaseUnsafeInputStream.mapValues { purchase =>
-      purchase.copy(creditCard = maskCardNumber(purchase.creditCard))
-    }
+    val purchaseInputStream: KStream[String, Purchase] = purchaseUnsafeInputStream.mapValues { purchase => purchase.maskCardNumber }
 
     val cafePredicate: Predicate[String, Purchase] = (k, p) => p.department == Cafe.toString
     val electronicsPredicate: Predicate[String, Purchase] = (k, p) => p.department == Electronix.toString
@@ -141,21 +59,13 @@ object ZMartApp {
     cafeStream.to(TopicNames.cafe, Produced.`with`(stringSerde, Purchase.purchaseSerde))
     electronicsStream.to(TopicNames.electronics, Produced.`with`(stringSerde, Purchase.purchaseSerde))
 
-    val filterPurchaseLowPrice: Predicate[String, Purchase] = (k, purchase) => { purchase.itemQty.forall(_._1.price > 15.0) }
+    val filterPurchaseLowPrice: Predicate[String, Purchase] = (k, purchase) => { purchase.quantity * purchase.price > 15.0 }
     purchaseInputStream
       .filter(filterPurchaseLowPrice)
       .to(TopicNames.purchase, Produced.`with`(stringSerde, Purchase.purchaseSerde))
 
-    val rewardsStream: KStream[String, String] = purchaseInputStream.mapValues { purchase =>
-      val customerId = purchase.customerId
-      val amountSpend = purchase.itemQty.map { case (item, qty) => item.price * qty }.sum
-      val jsRes = JsObject(List(
-        "customerId" -> JsString(customerId),
-        "amountSpend" -> JsNumber(amountSpend)
-      ))
-      Json.stringify(jsRes)
-    }
-    rewardsStream.to(TopicNames.rewards, Produced.`with`(stringSerde, stringSerde))
+    val rewardsStream: KStream[String, Reward] = purchaseInputStream.mapValues { purchase => Reward(purchase) }
+    rewardsStream.to(TopicNames.rewards, Produced.`with`(stringSerde, Reward.rewardSerde))
 
     val purchasePatternsStream = purchaseInputStream.mapValues { purchase =>
       Json.stringify {
@@ -177,10 +87,13 @@ object ZMartApp {
     val streamsApp = new KafkaStreams(resultTopology, properties)
     streamsApp.setUncaughtExceptionHandler(exceptionHander)
     streamsApp.start()
+    shutdownAfterAWhile(streamsApp)
+  }
 
+  def shutdownAfterAWhile(kafkaStreams: KafkaStreams): Unit = {
     val sideThread: Runnable = () => {
       Thread.sleep(600000)
-      streamsApp.close()
+      kafkaStreams.close()
       System.exit(0)
     }
     val th = new Thread(sideThread)
