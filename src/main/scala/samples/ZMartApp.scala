@@ -1,15 +1,13 @@
 package com.andy
 package samples
 
-import com.andy.ProducerZmart.{Cafe, Department, Electronix}
-import org.apache.kafka.common.serialization.Serdes.WrapperSerde
-import org.apache.kafka.common.serialization.{Deserializer, Serde, Serdes, Serializer}
-import org.apache.kafka.streams.StreamsConfig.DEFAULT_DESERIALIZATION_EXCEPTION_HANDLER_CLASS_CONFIG
-import org.apache.kafka.streams.errors.{LogAndFailExceptionHandler, StreamsUncaughtExceptionHandler}
-import org.apache.kafka.streams.kstream.{Branched, Consumed, ForeachAction, KStream, Named, Predicate, Produced}
-import org.apache.kafka.streams.{KafkaStreams, StreamsBuilder, StreamsConfig}
-import play.api.libs.json.{Format, JsArray, JsError, JsNumber, JsObject, JsResult, JsString, JsSuccess, JsValue, Json, OFormat}
+import ProducerZmart.{Cafe, Electronix}
 import model._
+
+import org.apache.kafka.common.serialization.Serdes
+import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler
+import org.apache.kafka.streams.kstream._
+import org.apache.kafka.streams.{KafkaStreams, StreamsBuilder, StreamsConfig}
 
 import java.util.Properties
 
@@ -32,6 +30,13 @@ object ZMartApp {
     val patterns = "patterns"
     val cafe = "cafe"
     val electronics = "electronics"
+  }
+
+  val exceptionHander: StreamsUncaughtExceptionHandler = new StreamsUncaughtExceptionHandler {
+    override def handle(exception: Throwable): StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse = {
+      println(exception.toString)
+      StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_APPLICATION
+    }
   }
 
   def main(args: Array[String]): Unit = {
@@ -67,22 +72,10 @@ object ZMartApp {
     val rewardsStream: KStream[String, Reward] = purchaseInputStream.mapValues { purchase => Reward(purchase) }
     rewardsStream.to(TopicNames.rewards, Produced.`with`(stringSerde, Reward.rewardSerde))
 
-    val purchasePatternsStream = purchaseInputStream.mapValues { purchase =>
-      Json.stringify {
-        val pp = PurchasePattern(purchase)
-        PurchasePattern.purchasePatternFormat.writes(pp)
-      }
-    }
-    purchasePatternsStream.to(TopicNames.patterns, Produced.`with`(stringSerde, stringSerde))
+    val purchasePatternsStream = purchaseInputStream.mapValues { purchase => PurchasePattern(purchase) }
+    purchasePatternsStream.to(TopicNames.patterns, Produced.`with`(stringSerde, PurchasePattern.purchasePatternSerde))
 
     val resultTopology = streamBuilder.build()
-
-    val exceptionHander: StreamsUncaughtExceptionHandler = new StreamsUncaughtExceptionHandler {
-      override def handle(exception: Throwable): StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse = {
-        println(exception.toString)
-        StreamsUncaughtExceptionHandler.StreamThreadExceptionResponse.SHUTDOWN_APPLICATION
-      }
-    }
 
     val streamsApp = new KafkaStreams(resultTopology, properties)
     streamsApp.setUncaughtExceptionHandler(exceptionHander)

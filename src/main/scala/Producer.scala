@@ -67,7 +67,7 @@ object ProducerZmart extends IOApp {
 
     val stream = for {
       producer <- Stream.resource(producerResource)
-      n <- Stream.iterate[IO, Int](0)(n => n + 1)
+      n <- Stream.iterate[IO, Int](0)(n => n + 1).flatMap(n => Stream.iterable(List(n, n, n)))
       department = Department.byIndex(Random.nextInt(3))
       zipCode = Random.nextInt(4) + 55202
       itemPurchased = Random.nextInt(20).toString
