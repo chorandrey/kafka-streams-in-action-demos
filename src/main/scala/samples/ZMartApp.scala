@@ -5,9 +5,13 @@ import ProducerZmart.{Cafe, Electronix}
 import model._
 
 import org.apache.kafka.common.serialization.Serdes
+import org.apache.kafka.common.utils.SystemTime
 import org.apache.kafka.streams.errors.StreamsUncaughtExceptionHandler
 import org.apache.kafka.streams.kstream._
-import org.apache.kafka.streams.{KafkaStreams, StreamsBuilder, StreamsConfig}
+import org.apache.kafka.streams.processor.{ProcessorContext, StateStore}
+import org.apache.kafka.streams.state.internals.{CachingKeyValueStore, KeyValueStoreBuilder}
+import org.apache.kafka.streams.state.{KeyValueBytesStoreSupplier, KeyValueStore, StoreBuilder, Stores}
+import org.apache.kafka.streams.{KafkaStreams, KeyValue, StreamsBuilder, StreamsConfig}
 
 import java.util.Properties
 
@@ -30,6 +34,11 @@ object ZMartApp {
     val patterns = "patterns"
     val cafe = "cafe"
     val electronics = "electronics"
+  }
+
+  object Constants {
+    val rewardsTransformer = "rewards-transformer"
+    val rewardsAccumulator = "rewards-accumulator"
   }
 
   val exceptionHander: StreamsUncaughtExceptionHandler = new StreamsUncaughtExceptionHandler {
@@ -69,8 +78,23 @@ object ZMartApp {
       .filter(filterPurchaseLowPrice)
       .to(TopicNames.purchase, Produced.`with`(stringSerde, Purchase.purchaseSerde))
 
-    val rewardsStream: KStream[String, Reward] = purchaseInputStream.mapValues { purchase => Reward(purchase) }
-    rewardsStream.to(TopicNames.rewards, Produced.`with`(stringSerde, Reward.rewardSerde))
+    val storeSupplier: KeyValueBytesStoreSupplier = Stores.inMemoryKeyValueStore(Constants.rewardsAccumulator)
+    val storeBuilder = new KeyValueStoreBuilder[String, RewardAccumulator](
+      storeSupplier,
+      stringSerde,
+      RewardAccumulator.rewardAccumulatorSerde,
+      new SystemTime()
+    )
+    streamBuilder.addStateStore(storeBuilder)
+
+    val transformerSupplierRewards: TransformerSupplier[String, Purchase, KeyValue[String, RewardAccumulator]] = {
+      new TransformerSupplier[String, Purchase, KeyValue[String, RewardAccumulator]] {
+        override def get(): Transformer[String, Purchase, KeyValue[String, RewardAccumulator]] = new RewardsKeyValueTransformer()
+      }
+    }
+    val rewardsStream: KStream[String, RewardAccumulator] = purchaseInputStream
+      .transform(transformerSupplierRewards, Named.as(Constants.rewardsTransformer), Constants.rewardsAccumulator)
+    rewardsStream.to(TopicNames.rewards, Produced.`with`(stringSerde, RewardAccumulator.rewardAccumulatorSerde))
 
     val purchasePatternsStream = purchaseInputStream.mapValues { purchase => PurchasePattern(purchase) }
     purchasePatternsStream.to(TopicNames.patterns, Produced.`with`(stringSerde, PurchasePattern.purchasePatternSerde))

@@ -5,6 +5,8 @@ import org.apache.kafka.common.serialization.{Deserializer, Serde, Serializer}
 import play.api.libs.json.{Format, JsArray, JsError, JsNumber, JsObject, JsResult, JsString, JsSuccess, JsValue, Json, OFormat}
 
 import java.nio.charset.StandardCharsets
+import java.time.temporal.{ChronoUnit, TemporalField, TemporalUnit}
+import java.time.{Duration, Instant}
 import java.util.Date
 import scala.collection.mutable.ListBuffer
 import scala.util.{Failure, Success, Try}
@@ -38,7 +40,7 @@ package object model {
     itemPurchased: String,
     quantity: Int,
     price: Double,
-    purchaseDate: Date,
+    purchaseTime: Instant,
     zipCode: String,
     department: String,
     storeId: String,
@@ -58,13 +60,13 @@ package object model {
     val purchaseSerde: Serde[Purchase] = genSerde[Purchase]
   }
 
-  case class PurchasePattern(zipCode: String, item: String, date: Date, amount: Int)
+  case class PurchasePattern(zipCode: String, item: String, purchaseTime: Instant, amount: Int)
   object PurchasePattern {
     implicit val purchasePatternFormat: OFormat[PurchasePattern] = Json.format[PurchasePattern]
     def apply(purchase: Purchase): PurchasePattern = PurchasePattern(
       purchase.zipCode,
       purchase.itemPurchased,
-      purchase.purchaseDate,
+      purchase.purchaseTime,
       purchase.quantity
     )
 
@@ -82,8 +84,13 @@ package object model {
     purchaseTotal: Double,
     totalRewardPoints: Int,
     currentRewardPoints: Int,
-    daysFromLastPurchase: Int
-  )
+    mostRecentOperationTimestamp: Instant,
+    daysSinceLastPurchase: Option[Long],
+  ) {
+    def daysSincePurchase(atTime: Instant): Long = {
+      Duration.between(mostRecentOperationTimestamp, atTime).toHours / 24
+    }
+  }
   object RewardAccumulator {
     implicit val rewardAccumulatorFormat: OFormat[RewardAccumulator] = Json.format[RewardAccumulator]
     val rewardAccumulatorSerde: Serde[RewardAccumulator] = genSerde[RewardAccumulator]

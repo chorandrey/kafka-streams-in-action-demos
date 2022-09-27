@@ -67,13 +67,13 @@ object ProducerZmart extends IOApp {
 
     val stream = for {
       producer <- Stream.resource(producerResource)
-      n <- Stream.iterate[IO, Int](0)(n => n + 1).flatMap(n => Stream.iterable(List(n, n, n)))
+      n <- Stream.iterate[IO, Int](0)(n => n + 1).flatMap(n => Stream.iterable(List.tabulate(5)(p => n)))
       department = Department.byIndex(Random.nextInt(3))
       zipCode = Random.nextInt(4) + 55202
       itemPurchased = Random.nextInt(20).toString
       quantity = Random.nextInt(10) + 1
       price = Random.nextInt(100).toDouble + Random.nextInt(100).toDouble / 100.0
-      date = Date.from(Instant.now())
+      date = Instant.now()
       storeId = Random.nextInt(5) + 1
       employeeId = Random.nextInt(1000)
       purchase = Purchase(
@@ -83,7 +83,7 @@ object ProducerZmart extends IOApp {
         zipCode = zipCode.toString,
         quantity = quantity,
         price = price,
-        purchaseDate = date,
+        purchaseTime = date,
         department = department.toString,
         storeId = storeId.toString,
         employeeId = Some(employeeId.toString)
